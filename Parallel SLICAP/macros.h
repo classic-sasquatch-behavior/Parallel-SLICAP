@@ -125,6 +125,15 @@ d_Mat& _first_ = *(_source_[0]);					 \
 d_Mat& _second_ = *(_source_[1]);					 \
 d_Mat& _third_ = *(_source_[2]);
 
+
+#define XML(_content_)				\
+{									\
+std::filesystem.open("sneaky.xml") << #_content_;		\
+}				
+
+
+
+
 #pragma endregion-------[1]
 
 #pragma region readme

@@ -15,7 +15,7 @@ uint block_size_y; //threads per block in the y dimension
 uint grid_size_x;  //blocks within grid in the x dimension
 uint grid_size_y;  //blocks within grid in the y dimension
 dim3 threads_per_block; //the actual threads per block to be passed into the kernel 
-dim3 num_blocks; //the acutal number of blocks to be passed into the kernel
+dim3 num_blocks; //the actual number of blocks to be passed into the kernel
 
 bool converged = false;
 
@@ -971,21 +971,34 @@ void AP() {
 }
 
 #pragma endregion
+
 void display_result() {
 	cv::imshow("source image", META::BGR_src);
 	cv::imshow("segmented image", META::segmented_image);
 	cv::waitKey(0);
 }
 
-void load_image();
+void load_image(string image_filename) {
+	h_Mat CIELAB_src;
+	BGR_src = cv::imread(image_filename, cv::IMREAD_COLOR);
+	cv::cvtColor(BGR_src, CIELAB_src, cv::COLOR_BGR2Lab);
+	CIELAB_planes = split_into_channels(CIELAB_src); //defined below
+}
+
+
+void initialize(string source) {
+	SLIC::initialize();
+	AP::initialize();
+
+}
 
 int main() {
-	load_image("example.png");
+	initialize("example.png");
 
-	SLIC();				 
-	AP(); 
+	SLIC(); //Simple Linear Iterative Clustering: an algorithm to oversegment the image into reguarly sized clusters, fittingly called superpixels.
+	AP(); //Affinity Propagation: a message passing algorithm which groups data points under their 'exemplars': data points which exemplify a large number of data points.
 
-	display_result();
+	display_result(META::segmented_image); //we will use Affinity Propagation to associate the superpixels produced by SLIC into larger regions, based on spatial and color distance. 
 
 	return 0;
 }
