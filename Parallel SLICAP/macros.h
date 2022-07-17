@@ -75,7 +75,7 @@ typedef cv::cuda::PtrStepSzf float_ptr; //same as above, although this one is fo
 int _x_dim_ = _id_ % _new_x_max_;								  \
 int _y_dim_ = (_id_ - _x_dim_) / _new_x_max_;
 
-#define RUN_UNTIL_CONVERGENCE(_define_convergence_, _content_) \
+#define REPEAT_UNTIL_CONVERGENCE(_define_convergence_, _content_) \
 	converged = false;				\
 	while(!converged) {				\
 		_content_;					\
