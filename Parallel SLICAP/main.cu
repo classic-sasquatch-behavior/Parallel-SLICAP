@@ -227,18 +227,18 @@ __global__ void AP_extract_and_examine_exemplars(int_ptr critereon_matrix, int_p
 
 #pragma region initialize centers
 
-__global__ void SLIC_initialize_centers(int_ptr K_rows, int_ptr K_cols, int_ptr src) {
-	GET_DIMS(col, row);
-	CHECK_BOUNDS(K_rows);
-	K_rows(row, col) = CAST_UP(row, K_rows.rows, src.rows);
-	K_cols(row, col) = CAST_UP(col, K_rows.cols, src.cols);
-}
-
-__global__ void SLIC_gradient_descent() {
+__global__ void SLIC_initialize_centers(int_ptr source, int_ptr center_rows, int_ptr center_cols) {
 	GET_DIMS(row, col);
-	CHECK_BOUNDS();
-
+	CHECK_BOUNDS(center_rows);
+	center_rows(row, col) = CAST_UP(row, center_rows.rows, source.rows);
+	center_cols(row, col) = CAST_UP(col, center_cols.cols, source.cols);
 }
+
+//__global__ void SLIC_gradient_descent() {
+//	GET_DIMS(row, col);
+//	CHECK_BOUNDS();
+//
+//}
 
 #pragma endregion
 
@@ -452,9 +452,8 @@ __global__ void SLIC_assign_new_labels(int_ptr labels, int_ptr map) {
 
 namespace SLICAP {
 
-	#pragma region general declarations
+	#pragma region declarations
 
-	//these variables are defined globally in order to cooperate with the kernel configuration functions
 	uint block_size_x; //threads per block in the x dimension
 	uint block_size_y; //threads per block in the y dimension
 	uint grid_size_x;  //blocks within grid in the x dimension
@@ -462,14 +461,18 @@ namespace SLICAP {
 	dim3 threads_per_block; //the actual threads per block to be passed into the kernel 
 	dim3 num_blocks; //the actual number of blocks to be passed into the kernel
 
-	bool converged = false;
+	h_Mat source;
+	vector<d_Mat> CIELAB_planes;
+	d_Mat& L_src = CIELAB_planes[0];
+	d_Mat& A_src = CIELAB_planes[1];
+	d_Mat& B_src = CIELAB_planes[2];
 
-	h_Mat BGR_src;
-	vector<d_Mat*> CIELAB_planes;
+	DECLARE_HOST_AND_DEVICE_POINTERS(uint, flag);
+
 
 	#pragma endregion
 
-	#pragma region general functions
+	#pragma region functions
 
 	vector<d_Mat*> split_into_channels(h_Mat input) {
 		vector<h_Mat> split;
@@ -488,7 +491,7 @@ namespace SLICAP {
 		CIELAB_planes = split_into_channels(CIELAB_src);
 	}
 
-	void conf_1d_kernel(cv::Size shape) {
+	void kernel_1d(cv::Size shape) {
 		uint src_x = shape.width;
 		uint src_y = shape.height;
 		block_size_x = 1024;
@@ -499,7 +502,7 @@ namespace SLICAP {
 		num_blocks = { grid_size_x, grid_size_y, 1 };
 	}
 
-	void conf_2d_kernel(cv::Size shape) {
+	void kernel_2d(cv::Size shape) {
 		uint src_x = shape.width;
 		uint src_y = shape.height;
 		block_size_x = 32;
@@ -514,10 +517,49 @@ namespace SLICAP {
 		return powf(2, ceil(log2(input)));
 	}
 
+	d_Mat exclusive_scan(d_Mat input, int& sum) {
+		d_Mat exclusive_sum_flags = flags;
+		DECLARE_HOST_AND_DEVICE_POINTERS(int, true_K);
+		int closest_greater_power = closest_greater_power_of_two(num_superpixels);
+		int N = closest_greater_power;
+		d_Mat results = exclusive_sum_flags;
+		d_Mat buffer = results;
+
+		int step_up = 1;
+		for (int i = 0; i < log2(closest_greater_power); i++) {
+			buffer = results;
+			N /= 2;
+			step_up *= 2;
+			LAUNCH_KERNEL(exclusive_scan_upsweep, kernel_1d(cv::Size(N, 1)), (N, step_up, results, buffer, d_true_K));
+			results = buffer;
+		}
+
+		N = 1;
+		int step_down = closest_greater_power;
+		for (int i = log2(closest_greater_power); i > 0; i--) {
+			buffer = results;
+			N *= 2;
+			step_down /= 2;
+			LAUNCH_KERNEL(exclusive_scan_downsweep, kernel_1d(cv::Size(N, 1)), (N, step_down, results, buffer));
+			results = buffer;
+		}
+	}
+
 	void display_result() {
 		cv::imshow("source image", source_image);
 		cv::imshow("segmented image", segmented_image);
 		cv::waitKey(0);
+	}
+
+	void reset_flag() {
+		flag = 0;
+		CUDA_FUNCTION_CALL(cudaMalloc((void**)&d_flag, sizeof(uint)));
+		CUDA_FUNCTION_CALL(cudaMemcpy(d_flag, h_flag, sizeof(uint), cudaMemcpyHostToDevice));
+	}
+
+	void read_flag() {
+		CUDA_FUNCTION_CALL(cudaMemcpy(d_flag, h_flag, sizeof(uint), cudaMemcpyHostToDevice));
+		CUDA_FUNCTION_CALL(cudaFree(d_flag));
 	}
 
 	#pragma endregion
@@ -526,207 +568,135 @@ namespace SLICAP {
 
 		#pragma region SLIC declarations
 
+		const int displacement_threshold = 1;
+		const float density = 0.5;
+		const int superpixel_size_factor = 10;
+		
+		int source_rows, source_cols, num_pixels;
+		int SP_rows, SP_cols, num_superpixels;
+		int space_between_centers;
+		int density_modifier;
 
+		d_Mat labels;
+		d_Mat center_rows, center_cols, center_grid;
+		d_Mat row_sums, col_sums, num_instances;
+
+		DECLARE_HOST_AND_DEVICE_POINTERS(int, displacement);
 		#pragma endregion
 
 		void initialize() {
+
 			//initialize values
-			int dmod = density / S;					 //factor which will be used to temper the influence of space on the result of the distance function
-			int src_rows = labels.rows;				 //the number of actual rows in the source image
-			int src_cols = labels.cols;				 //the number of actual columns in the source image
-			int num_pixels = src_rows * src_cols;	 //the total number of pixels in the source image
-			int SP_rows = floor(src_rows / S);		 //the number of superpixels in each row of the resulting image
-			int SP_cols = floor(src_cols / S);		 //the number of superpixels in each column of the resulting image
-			int num_superpixels = SP_rows * SP_cols; //the predicted number of superpixels (subject to variance, which will be addressed when we enforce connectivity)
-			int& K = num_superpixels;				 //alias for the number of superpixels which conforms to the language of the original paper
+			source_rows = source.rows;
+			source_cols = source.cols;
+			num_pixels = source_rows * source_cols; 
 
-				//bring source channels into scope
-			d_Mat L_src, A_src, B_src;
-			UNPACK(src_planes, L_src, A_src, B_src);
+			space_between_centers = sqrt(num_pixels) / superpixel_size_factor;
+			density_modifier = density / space_between_centers;
 
-			//initialize centers
-			d_Mat d_center_rows(cv::Size(SP_cols, SP_rows), CV_32SC1);
-			d_Mat d_center_cols(cv::Size(SP_cols, SP_rows), CV_32SC1);
+			SP_rows = floor(source_rows/space_between_centers);
+			SP_cols = floor(source_cols/space_between_centers);
+			num_superpixels = SP_rows * SP_cols;
 
-			//initialize matrices to support update_centers
+			d_Mat labels(cv::Size(source_rows, source_cols), CV_32SC1);
+
+			d_Mat center_rows(cv::Size(SP_cols, SP_rows), CV_32SC1);
+			d_Mat center_cols(cv::Size(SP_cols, SP_rows), CV_32SC1);
+			d_Mat center_grid(cv::Size(SP_cols, SP_rows), CV_32SC1);
+
 			d_Mat row_sums(cv::Size(num_pixels, 1), CV_32SC1);
 			d_Mat col_sums(cv::Size(num_pixels, 1), CV_32SC1);
 			d_Mat num_instances(cv::Size(num_pixels, 1), CV_32SC1);
 
-			bool converged = false;
-			DECLARE_HOST_AND_DEVICE_POINTERS(float, displacement);
-			CUDA_FUNCTION_CALL(cudaMalloc((void**)&d_displacement, sizeof(uint)));
-
-			result = segment_image_using_exemplars(exemplars, labels, average_superpixel_color_vectors);
 		}
 
-		void initialize_centers(d_Mat source, d_Mat& rows_out, d_Mat& cols_out) {
-
-			conf_2d_kernel(rows_out.size());
-			SLIC_initialize_centers << <num_blocks, threads_per_block >> > \
-				(source, rows_out, cols_out);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_initialize_centers);
-
-			conf_2d_kernel(rows_out.size());
-			SLIC_gradient_descent << <num_blocks, threads_per_block >> > \
-				();
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_gradient_descent);
-
+		void reset_displacement() {
+			displacement = 0;
+			CUDA_FUNCTION_CALL(cudaMalloc((void**)&d_displacement, sizeof(int)));
+			CUDA_FUNCTION_CALL(cudaMemcpy(d_displacement, h_displacement, sizeof(int), cudaMemcpyHostToDevice));
 		}
 
-		void enforce_connectivity(int size_threshold, int num_superpixels, d_Mat labels) {
+		void read_displacement() {
+			CUDA_FUNCTION_CALL(cudaMemcpy(d_displacement, h_displacement, sizeof(int), cudaMemcpyHostToDevice));
+			CUDA_FUNCTION_CALL(cudaFree(d_displacement));
+		}
 
-			launch_SLIC_separate_blobs();
+		void sample_centers() {
 
-			launch_SLIC_absorb_small_blobs();
-
-			launch_SLIC_produce_ordered_labels();
+			LAUNCH_KERNEL(SLIC_initialize_centers, kernel_2d(center_grid.size()), (source, center_rows, center_cols));
 
 		}
 
 		void assign_pixels_to_centers() {
-			conf_2d_kernel(labels.size());
-			SLIC_assign_pixels_to_centers << <num_blocks, threads_per_block >> > \
-				(L_src, A_src, B_src, center_rows, center_cols, labels);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_assign_pixels_to_centers);
+
+			LAUNCH_KERNEL(SLIC_assign_pixels_to_centers, kernel_2d(labels.size()), (L_src, A_src, B_src, center_rows, center_cols, labels));
+
 		}
 
 		void update_centers() {
-			conf_2d_kernel(labels.size());
-			SLIC_condense_labels << <num_blocks, threads_per_block >> > \
-				(labels, row_sums, col_sums, num_instances);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_condense_labels);
+			LAUNCH_KERNEL(SLIC_condense_labels, kernel_2d(labels.size()), (labels, row_sums, col_sums, num_instances));
 
-			conf_1d_kernel(num_instances.size());
-			SLIC_update_centers << <num_blocks, threads_per_block >> > \
-				(row_sums, col_sums, num_instances, center_rows, center_cols);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_update_centers);
-
-			CUDA_FUNCTION_CALL(cudaMemcpy(h_displacement, d_displacement, sizeof(uint), cudaMemcpyDeviceToHost));
+			reset_displacement();
+			LAUNCH_KERNEL(SLIC_update_centers, kernel_1d(num_instances.size()), (row_sums, col_sums, num_instances, center_rows, center_cols));
+			read_displacement();
 		}
 
 		void separate_blobs() {
 			d_Mat working_labels = labels;
 
-			//separate_blobs
-			DECLARE_HOST_AND_DEVICE_POINTERS(int, flag);
-			flag = 0;
-			CUDA_FUNCTION_CALL(cudaMalloc((void**)&d_flag, sizeof(int)));
+			while (flag != 0) {
+				reset_flag();
 
-			bool converged = false;
-			while (!converged) {
+				LAUNCH_KERNEL(SLIC_separate_blobs, kernel_2d(labels.size()), (labels, working_labels, d_flag));
 
-				flag = 0;
-				CUDA_FUNCTION_CALL(cudaMemcpy(d_flag, h_flag, sizeof(int), cudaMemcpyHostToDevice));
-
-				conf_2d_kernel(labels.size());
-				SLIC_separate_blobs << <num_threads, threads_per_block >> > \
-					(labels, working_labels, d_flag);
-				SYNC_AND_CHECK_FOR_ERRORS(SLIC_separate_blobs);
-
-				CUDA_FUNCTION_CALL(cudaMemcpy(h_flag, d_flag, sizeof(int), cudaMemcpyDeviceToHost));
-
-				if (flag == 0) {
-					converged = true;
-				}
+				read_flag();
 			}
+
 		}
 
-		void absorb_small_blobs() {		//find sizes
+		void absorb_small_blobs() {		
 			d_Mat cluster_sizes(cv::Size(num_superpixels, 1), CV_32SC1);
-			conf_2d_kernel(labels.size());
-			SLIC_find_sizes << <num_threads, threads_per_block >> > \
-				(labels, cluster_sizes);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_find_sizes);
-
-			//find weak labels
 			d_Mat cluster_strengths(cv::Size(num_superpixels, 1), CV_32SC1);
-			conf_1d_kernel(cluster_sizes.size());
-			SLIC_find_weak_labels << <num_threads, threads_per_block >> > \
-				(cluster_sizes, cluster_strengths, size_threshold);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_find_weak_labels);
+			d_Mat working_labels = labels;
+			
+			LAUNCH_KERNEL(SLIC_find_sizes, kernel_2d(labels.size()), (labels, cluster_sizes));
 
-			//absorb small blobs
-			flag = 0;
-			CUDA_FUNCTION_CALL(cudaMalloc((void**)&d_flag, sizeof(int)));
-			CUDA_FUNCTION_CALL(cudaMemcpy(d_flag, h_flag, sizeof(int), cudaMemcpyHostToDevice));
-			converged = false;
+			LAUNCH_KERNEL(SLIC_find_weak_labels, kernel_1d(cluster_sizes.size()), (cluster_sizes, cluster_strengths, size_threshold));
 
-			while (!converged) {
-				conf_2d_kernel(labels.size());
-				SLIC_absorb_small_blobs << <num_threads, threads_per_block >> > \
-					(labels, cluster_strengths, cluster_sizes, working_labels, flag);
-				SYNC_AND_CHECK_FOR_ERRORS(SLIC_absorb_small_blobs);
-				CUDA_FUNCTION_CALL(cudaMemcpy(h_flag, d_flag, sizeof(int), cudaMemcpyDeviceToHost));
-
-				if (flag == 0) {
-					converged = true;
-					CUDA_FUNCTION_CALL(cudaFree(d_flag));
-				}
+			while (flag != 0) {
+				reset_flag();
+				LAUNCH_KERNEL(SLIC_absorb_small_blobs, kernel_2d(labels.size()), (labels, cluster_strengths, cluster_sizes, working_labels, flag))
+				read_flag();
 			}
+
 		}
 
 		void produce_ordered_labels() {
-			d_Mat flags(cv::Size(num_superpixels, 1), CV_32SC1, cv::Scalar{ 0 });
-			conf_2d_kernel(labels.size());
-			SLIC_raise_flags << <num_threads, threads_per_block >> > \
-				(labels, flags);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_raise_flags);
+			d_Mat flags(cv::Size(num_pixels, 1), CV_32SC1, cv::Scalar{ 0 });
+			int true_K;
 
-			//exclusive sum
-			d_Mat exclusive_sum_flags = flags;
-			DECLARE_HOST_AND_DEVICE_POINTERS(int, true_K);
+			LAUNCH_KERNEL(SLIC_raise_flags, kernel_2d(labels.size()), (labels, flags));
 
-			int closest_greater_power = closest_greater_power_of_two(num_superpixels);
-			int N = closest_greater_power;
+			d_Mat exclusive_scan_flags = exclusive_scan(flags, true_K);
 
-			d_Mat results = exclusive_sum_flags;
-			d_Mat buffer = results;
-
-			int step_up = 1;
-			for (int i = 0; i < log2(closest_greater_power); i++) {
-				buffer = results;
-				N /= 2;
-				step_up *= 2;
-				conf_1d_kernel(cv::Size(N, 1));
-				GEN_exclusive_scan_upsweep << <num_blocks, threads_per_block >> > \
-					(N, step_up, results, buffer, d_true_K);
-				SYNC_AND_CHECK_FOR_ERRORS(GEN_exclusive_scan_upsweep);
-				results = buffer;
-			}
-
-			N = 1;
-			int step_down = closest_greater_power;
-			for (int i = log2(closest_greater_power); i > 0; i--) {
-				buffer = results;
-				N *= 2;
-				step_down /= 2;
-				conf_1d_kernel(cv::Size(N, 1));
-				GEN_exclusive_scan_downsweep << <num_blocks, threads_per_block >> > \
-					(N, step_down, results, buffer);
-				SYNC_AND_CHECK_FOR_ERRORS(GEN_exclusive_scan_downsweep);
-				results = buffer;
-			}
-
-			//initialize map
 			d_Mat condensed_map(cv::Size(true_K, 1), CV_32SC1);
-			conf_1d_kernel(condensed_map.size());
-			SLIC_init_map << <num_blocks, threads_per_block >> > \
-				(flags, results, condensed_map);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_init_map);
+			LAUNCH_KERNEL(SLIC_init_map, kernel_1d(condensed_map.size()), (flags, results, condensed_map));
 
-			//invert map
 			d_Mat useful_map = flags;
-			conf_1d_kernel(useful_map.size());
-			SLIC_invert_map << <num_blocks, threads_per_block >> > \
-				(condensed_map, useful_map);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_invert_map);
+			LAUNCH_KERNEL(SLIC_invert_map, kernel_1d(useful_map.size()), (condensed_map, useful_map));
 
-			//assign new labels
-			conf_1d_kernel(labels.size());
-			SLIC_assign_new_labels << <num_threads, threads_per_block >> > \
-				(labels, useful_map);
-			SYNC_AND_CHECK_FOR_ERRORS(SLIC_assign_new_labels);
+			LAUNCH_KERNEL(SLIC_assign_new_labels, kernel_1d(labels.size()), (labels, useful_map));
+			
+		}
+
+		void enforce_connectivity() {
+
+			separate_blobs();
+
+			absorb_small_blobs();
+
+			produce_ordered_labels();
+
 		}
 
 	}
@@ -835,7 +805,7 @@ namespace SLICAP {
 			SYNC_AND_CHECK_FOR_ERRORS(AP_extract_and_examine_exemplars);		 //
 		}
 
-		h_Mat segment_image_using_exemplars(d_Mat d_exemplars, d_Mat d_labels, d_Mat d_average_colors) {
+		void segment_image_using_exemplars() {
 			h_Mat exemplars;
 			h_Mat labels;
 			h_Mat average_colors;
@@ -871,10 +841,10 @@ namespace SLICAP {
 void SLIC() { using namespace SLICAP;
 
 	//SLIC is an algorithm which oversegments an image into regularly spaced clusters of pixels with similar characteristics, known as superpixels. 
-	// It is quite similar to the popular K-means algorithm, the main difference being that it explicitly takes into account spatial proximity, 
-	//and seeds the centers in such a way as to produce a field of superpixels. 
+	//It is quite similar to the popular K-means algorithm, the main difference being that it explicitly takes into account spatial proximity, 
+	//and seeds regularly spaced centers along a virtual grid, so as to ultimately produce a field of superpixels. 
 
-	SLIC::initialize_centers(); 
+	SLIC::sample_centers(); 
 	//first, we sample a number of points from the source image to serve as centers, at regular intervals S
 
 	REPEAT_UNTIL_CONVERGENCE((SLIC::displacement <= SLIC::displacement_threshold),
@@ -918,10 +888,16 @@ void AP() { using namespace SLICAP;
 int main() {
 	SLICAP::initialize("example.png");
 
-	SLIC(); //Simple Linear Iterative Clustering: an algorithm to oversegment the image into a field of reguarly sized clusters, fittingly called superpixels.
-	AP(); //Affinity Propagation: a message passing algorithm which groups data points under their 'exemplars': data points which are similar to a large number of other data points.
+	SLIC(); 
+	//Simple Linear Iterative Clustering: an algorithm to oversegment the image into a field of reguarly sized clusters, fittingly called superpixels.
 
-	SLICAP::display_result(); //we will use Affinity Propagation to associate the superpixels produced by SLIC into larger regions based on color distance, producing a segmentation of the original image. 
+	AP(); 
+	//Affinity Propagation: a message passing algorithm which groups data points under their 'exemplars': data points which are 
+	//suitably representative of a large number of other data points.
+
+	SLICAP::display_result(); 
+	//we will use Affinity Propagation to associate the superpixels produced by SLIC into larger regions based on color distance, 
+	//producing a segmentation of the original image. 
 
 	return 0;
 }

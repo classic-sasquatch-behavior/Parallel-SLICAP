@@ -75,14 +75,7 @@ typedef cv::cuda::PtrStepSzf float_ptr; //same as above, although this one is fo
 int _x_dim_ = _id_ % _new_x_max_;								  \
 int _y_dim_ = (_id_ - _x_dim_) / _new_x_max_;
 
-#define REPEAT_UNTIL_CONVERGENCE(_define_convergence_, _content_) \
-	converged = false;				\
-	while(!converged) {				\
-		_content_;					\
-		if (_define_convergence_) {	\
-			converged = true;		\
-		}							\
-	}								
+								
 
 
 
@@ -112,6 +105,15 @@ int _y_dim_ = (_id_ - _x_dim_) / _new_x_max_;
 		abort();													  				 \
 		}																			 \
 }			
+
+
+#define LAUNCH_KERNEL(_kernel_name_, _configure_kernel_, _kernel_arguments_) \
+_configure_kernel_;
+_kernel_name_ <<<num_threads, threads_per_block>>> _kernel_arguments_;
+SYNC_AND_CHECK_FOR_ERRORS(_kernel_name_);
+
+
+
 
 //create the necessary host and device pointers to allocate memory to the device. written as a macro to reduce boilerplate.
 #define DECLARE_HOST_AND_DEVICE_POINTERS(_type_, _pointer_name_) \
