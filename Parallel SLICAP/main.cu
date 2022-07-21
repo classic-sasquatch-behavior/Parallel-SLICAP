@@ -779,12 +779,14 @@ namespace SLICAP {
 
 		void update_critereon_matrix() {
 			LAUNCH_KERNEL(AP_calculate_critereon_matrix, kernel_2d(critereon_matrix.size()), (availibility_matrix, responsibility_matrix, critereon_matrix));
-			//the critereon matrix is the sum of the responsibility and the availibility matrix. for each point, the 
+			//the critereon matrix is the sum of the responsibility and the availibility matrix. for each data point, the potential exemplar with the highest critereon value is selected
+			//to be the exemplar of that data point. If a point is selected as an exemplar by another, this will necessarily be reflected by that point choosing itself as its own exemplar.
 		}
 
 		void extract_and_examine_exemplars() {
 			LAUNCH_KERNEL(AP_extract_and_examine_exemplars, kernel_1d(exemplars.size()), (critereon_matrix, exemplars, d_difference_in_exemplars));
-			//we extract the exemplars for each data point
+			//we extract the exemplars for each data point, and check this list against the one generated in the previous cycle. We take note of the difference between
+			//the two lists and compare it in the outer loop against a threshold to determine convergence. 
 		}
 
 		void segment_image_using_exemplars() {
