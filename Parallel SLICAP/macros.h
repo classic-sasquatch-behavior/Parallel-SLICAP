@@ -35,7 +35,7 @@ typedef cv::cuda::PtrStepSzf float_ptr; //same as above, although this one is fo
 //aquire the coordinates of the thread. works on 2d kernels as well as 1d, if youre okay with ignoring one of the dimensions.
 #define GET_DIMS(_y_dim_, _x_dim_)							\
 	int _x_dim_ = (blockIdx.x * blockDim.x) + threadIdx.x;	\
-	int _y_dim_ = (threadIdx.y * blockDim.y) + threadIdx.y;	\
+	int _y_dim_ = (blockIdx.y * blockDim.y) + threadIdx.y;	\
 	int & _X_ = _x_dim_;									\
 	int & _Y_ = _y_dim_;										
 
