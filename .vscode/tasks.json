@@ -1,0 +1,42 @@
+{
+    "version": "2.0.0",
+
+
+    
+
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "nvcc",
+            "args": [
+                "-std=c++17",
+                "-O3",
+                "-w",
+                "-rdc=false",
+                "-o",
+                "${workspaceFolder}/build",
+                "Main.cu",
+                "-I${workspaceFolder}/include", "-I${workspaceFolder}/**",
+                "-lopencv_core",
+                "-lopencv_highgui",
+                "-lopencv_imgproc",
+                "-lopencv_cudev",
+                "-lopencv_imgcodecs"
+
+            ],
+
+            "problemMatcher": [
+                {
+                    "base":"$nvcc",
+                    "fileLocation": ["autoDetect", "${workspaceFolder}/**"]
+                }
+            ],
+
+            "group": {
+                "kind":"build",
+                "isDefault": true
+            },
+        }
+    ]
+}

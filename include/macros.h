@@ -1,34 +1,6 @@
 #pragma once
 
-#pragma region includes
-
-//opencv
-#include<opencv2/opencv.hpp>
-
-//cuda
-#include<cuda.h>
-#include<device_launch_parameters.h>
-#include<cuda_runtime_api.h>
-
-//stdlib
-#include<string>
-#include<vector>
-using std::string;
-using std::vector;
-
-#pragma endregion
-
-#pragma region typedefs
-
-typedef unsigned int uint;
-
-typedef cv::Mat h_Mat;			//host matrix container
-typedef cv::cuda::GpuMat d_Mat; //device matrix container
-
-typedef cv::cuda::PtrStepSzi int_ptr;   //the pointer through which d_Mat is accessed from within the kernel
-typedef cv::cuda::PtrStepSzf float_ptr; //same as above, although this one is for floats.
-
-#pragma endregion
+#include"external_includes.h"
 
 #pragma region device macros
 
@@ -73,35 +45,11 @@ typedef cv::cuda::PtrStepSzf float_ptr; //same as above, although this one is fo
 
 #pragma region host macros
 
-//launch a cuda function (such as those required for memory allocation), and make sure it went through without error
-#define CUDA_FUNCTION_CALL(_function_)													  \
-{																						  \
-	cudaError_t error = (_function_);													  \
-	if(error != cudaSuccess) {															  \
-		std::cout << "Error at " << __FILE__ << ":" << __LINE__ << " - "				  \
-			<< cudaGetErrorName(error) << ", " << cudaGetErrorString(error) << std::endl; \
-		abort();																		  \
-	}																					  \
-}
 
-//synchronize host with device, check for errors in the kernel
-#define SYNC_AND_CHECK_FOR_ERRORS(_kernel_)											 \
-{																					 \
-	cudaDeviceSynchronize();														 \
-	cudaError_t error = cudaGetLastError();											 \
-	if(error != cudaSuccess) {														 \
-		std::cout << "Error in kernel " << #_kernel_								 \
-		<< " at " << __FILE__ << ":" << __LINE__ << ": "							 \
-		<< cudaGetErrorName(error) << ":" << cudaGetErrorString(error) << std::endl; \
-		abort();													  				 \
-		}																			 \
-}			
 
-//launch kernel
-#define LAUNCH_KERNEL(_kernel_name_, _configure_kernel_, _kernel_arguments_) \
-	_configure_kernel_;														 \
-	_kernel_name_ <<<num_blocks, threads_per_block>>> _kernel_arguments_;	 \
-	SYNC_AND_CHECK_FOR_ERRORS(_kernel_name_);
+#define PRINT_MAT(_input_)\
+std::cout << std::endl << #_input_ << std::endl;\
+std::cout << "cols: " << _input_.cols << ", rows: " << _input_.rows << std::endl;
 
 //create the necessary host and device pointers to allocate memory to the device. written as a macro to reduce boilerplate.
 #define DECLARE_HOST_AND_DEVICE_POINTERS(_type_, _pointer_name_) \

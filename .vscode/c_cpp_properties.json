@@ -1,0 +1,29 @@
+
+
+{
+    "env": {
+        "myDefaultIncludePath": ["${workspaceFolder}/*","${PATH}", "${workspaceFolder}/include/*"],
+        "myCompilerPath": ["/usr/bin/gcc"]
+    },
+
+    "configurations": [ 
+        {
+            "name": "default",
+            "intelliSenseMode": "${default}",
+            "includePath": ["${myDefaultIncludePath}"],
+            "defines":["VERBOSE"],
+            "forcedInclude": [],
+            "compilerPath": "${myCompilerPath}",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "browse": {
+                "path":["${workspaceFolder}"],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            }
+            
+        }
+    ],
+        
+    "version":4
+}
