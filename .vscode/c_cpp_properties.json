@@ -2,7 +2,7 @@
 
 {
     "env": {
-        "myDefaultIncludePath": ["${workspaceFolder}/*","${PATH}", "${workspaceFolder}/include/*"],
+        "myDefaultIncludePath": ["${workspaceFolder}/*","${PATH}", "${workspaceFolder}/include/*", "${workspaceFolder}/kernels/*","${workspaceFolder}/matrix/*"],
         "myCompilerPath": ["/usr/bin/gcc"]
     },
 

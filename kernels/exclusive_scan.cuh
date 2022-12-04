@@ -1,5 +1,5 @@
 #pragma once
-#include"matrix/Matrix.cuh"
+#include"Matrix.cuh"
 
 
 template<typename Type>
