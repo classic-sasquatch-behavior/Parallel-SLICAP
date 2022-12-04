@@ -4,12 +4,8 @@
 #include"exclusive_scan.cuh"
 #include"SLICAP.h"
 
-struct SLIC {
 
-	const int displacement_threshold = 1;
-	const float density = 0.5;
-	const int superpixel_size_factor = 10;
-	const int size_threshold = (superpixel_size_factor * superpixel_size_factor) / 2;
+struct SLIC {
 	
 	SLICAP* parent;
 
@@ -21,11 +17,12 @@ struct SLIC {
 	d_Mat center_rows, center_cols, center_grid;
 	d_Mat row_sums, col_sums, num_instances;
 
-	int displacement;
+	int displacement = 0;
 	int* h_displacement = &displacement;
 	int* d_displacement;
 
-	SLIC(h_Mat SLIC_source, SLICAP* _parent);
+	SLIC(int _source_cols, int _source_rows, int _num_pixels, int _space_between_centers, 
+    int _density_modifier, int _SP_cols, int _SP_rows, int _num_superpixels, SLICAP* _parent);
 
 	void sample_centers();
 

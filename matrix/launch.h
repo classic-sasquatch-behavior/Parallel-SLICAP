@@ -11,6 +11,7 @@ if(_function_ != cudaSuccess){                                 \
     exit(EXIT_FAILURE);}
 
 #define SYNC_KERNEL(_message_)                                    \
+cudaDeviceSynchronize();\
 Error::error = cudaGetLastError();                                       \
 if(Error::error != cudaSuccess){                                         \
 std::cout << "KERNEL " << _message_ << " FAILED " <<std::endl;    \

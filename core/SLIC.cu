@@ -1,26 +1,26 @@
 #include"SLIC.h"
 
-SLIC::SLIC(h_Mat SLIC_source, SLICAP* _parent): 
-        parent(_parent),
-		source_rows(SLIC_source.rows), 
-		source_cols(SLIC_source.cols), 
-		num_pixels(source_rows * source_cols),
-
-		space_between_centers(sqrt(num_pixels) / superpixel_size_factor), 
-		density_modifier(density / space_between_centers),
-
-		SP_rows(floor(source_rows/space_between_centers)), 
-		SP_cols(floor(source_cols/space_between_centers)), 
-		num_superpixels(SP_rows * SP_cols),
-
-		center_rows(cv::Size(SP_cols, SP_rows), CV_32SC1), 
-		center_cols(cv::Size(SP_cols, SP_rows), CV_32SC1), 
-		center_grid(cv::Size(SP_cols, SP_rows), CV_32SC1),
+SLIC::SLIC(int _source_cols, int _source_rows, int _num_pixels, int _space_between_centers, 
+    int _density_modifier, int _SP_cols, int _SP_rows, int _num_superpixels, SLICAP* _parent): 
+		center_rows(cv::Size(_SP_cols, _SP_rows), CV_32SC1), 
+		center_cols(cv::Size(_SP_cols, _SP_rows), CV_32SC1), 
+		center_grid(cv::Size(_SP_cols, _SP_rows), CV_32SC1),
 
 		row_sums(cv::Size(num_pixels, 1), CV_32SC1), 
 		col_sums(cv::Size(num_pixels, 1), CV_32SC1), 
 		num_instances(cv::Size(num_pixels, 1), CV_32SC1)
-	{}
+	{
+        parent = _parent;
+        source_rows = _source_rows;
+        source_cols = _source_cols;
+        num_pixels = _num_pixels;
+        space_between_centers = _space_between_centers;
+        density_modifier = _density_modifier;
+        SP_cols = _SP_cols;
+        SP_rows = _SP_rows;
+        num_superpixels = _num_superpixels;    
+        
+    }
 
 void SLIC::sample_centers(){
 		Launch::kernel_2d(center_grid.cols, center_grid.rows);
@@ -36,12 +36,15 @@ void SLIC::assign_pixels_to_centers(){
 
 void SLIC::reset_displacement(){
     displacement = 0;
+    h_displacement = &displacement;
     CUDA_SAFE_CALL(cudaMalloc((void**)&d_displacement, sizeof(int)));
+
+
     CUDA_SAFE_CALL(cudaMemcpy(d_displacement, h_displacement, sizeof(int), cudaMemcpyHostToDevice));
 }
 
 void SLIC::read_displacement(){
-    CUDA_SAFE_CALL(cudaMemcpy(d_displacement, h_displacement, sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMemcpy(h_displacement, d_displacement, sizeof(int), cudaMemcpyDeviceToHost));
     CUDA_SAFE_CALL(cudaFree(d_displacement));
 }
 
@@ -91,7 +94,7 @@ void SLIC::absorb_small_blobs(){
     //first we simply record the size of each blob in pixels
 
     Launch::kernel_1d(cluster_sizes.cols);
-    SLIC_find_weak_labels<<<LAUNCH>>>(cluster_sizes, cluster_strengths, size_threshold);
+    SLIC_find_weak_labels<<<LAUNCH>>>(cluster_sizes, cluster_strengths, Param::size_threshold);
     SYNC_KERNEL("SLIC_find_weak_labels");
     //then, we compare each blob size to a prescribed threshold, and assign a binary flag indicating whether that blob surpasses or falls short of the threshold.
 

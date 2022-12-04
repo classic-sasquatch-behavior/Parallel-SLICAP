@@ -1,5 +1,6 @@
 #pragma once
 #include"external_includes.h"
+#include"global.h"
 
 struct SLIC;
 struct AP;
@@ -30,7 +31,7 @@ struct SLICAP {
 
 	int num_superpixels;
 
-	SLICAP(std::string source_path);
+	SLICAP(h_Mat source);
 	~SLICAP(){
 		delete SLIC_eng;
 		delete AP_eng;

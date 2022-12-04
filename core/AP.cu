@@ -3,16 +3,29 @@
 
 
 
-AP::AP(){
+AP::AP(SLICAP* _parent){
+	parent = _parent;
     cv::Size AP_matrix_size(parent->num_superpixels, parent->num_superpixels);
 
+	std::cout << "creating similarity matrix" << std::endl;
     d_Mat similarity_matrix(AP_matrix_size, AP_matrix_type);
+
+	std::cout << "creating responsibility matrix" << std::endl;
     d_Mat responsibility_matrix(AP_matrix_size, AP_matrix_type);
+
+	std::cout << "creating availibility matrix" << std::endl;
     d_Mat availibility_matrix(AP_matrix_size, AP_matrix_type, cv::Scalar{ 0 });
+
+	std::cout << "creating critereon matrix" <<std::endl;
     d_Mat critereon_matrix(AP_matrix_size, AP_matrix_type);
+
+	std::cout << "creating exemplars" <<std::endl;
     d_Mat exemplars(cv::Size(parent->num_superpixels, 1), CV_32SC1);
 
+	std::cout << "creating average superpixel color vectors" << std::endl;
     d_Mat average_superpixel_color_vectors(cv::Size(parent->num_superpixels, 3), CV_32SC1);
+
+	std::cout << "creating list of pixels per superpixel" <<std::endl;
     d_Mat pixels_per_superpixel(cv::Size(parent->num_superpixels, 1), CV_32SC1);
 }
 
@@ -56,7 +69,7 @@ void AP::generate_similarity_matrix() {
 
 void AP::update_responsibility_matrix(){
 		Launch::kernel_2d(responsibility_matrix.cols, responsibility_matrix.rows);
-		AP_update_responsibility_matrix<<<LAUNCH>>>(similarity_matrix, availibility_matrix, damping_factor, responsibility_matrix);
+		AP_update_responsibility_matrix<<<LAUNCH>>>(similarity_matrix, availibility_matrix, Param::damping_factor, responsibility_matrix);
 		SYNC_KERNEL("AP_update_responsibility_matrix");
 		//the responsibility at a given point is set as follows: r(data, exemplar) = s(data, exemplar) - max{a(data, i_exemplar) + s(data, i_exemplar)} s.t. i_exemplar != exemplar
 		//conceptually, the responsibility is the table of messages sent from the data points to the exemplar candidates.
@@ -65,7 +78,7 @@ void AP::update_responsibility_matrix(){
 void AP::update_availibility_matrix() {
 
 		Launch::kernel_2d(availibility_matrix.cols, availibility_matrix.rows);
-		AP_update_availibility_matrix<<<LAUNCH>>>(responsibility_matrix, availibility_matrix, damping_factor);
+		AP_update_availibility_matrix<<<LAUNCH>>>(responsibility_matrix, availibility_matrix, Param::damping_factor);
 		SYNC_KERNEL("AP_update_availibility_matrix");
 		//the availibility at a given point is set as follows: a(data, exemplar) = min{0, r(exemplar exemplar) + Σ{max(0, r(i_data, exemplar))}} s.t. i_data != data or exemplar
 		//conceptually, the availibility is the table of messages sent from the exemplars candidates to the data points, in a sense the inverse of the responsibility messages. 

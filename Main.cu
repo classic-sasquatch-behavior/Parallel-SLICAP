@@ -9,8 +9,11 @@
 
 int main() {
 
+	std::cout << "loading source" << std::endl;
+	h_Mat source = cv::imread("examples/example.png", cv::IMREAD_COLOR);
+
 	std::cout << "initializing engine" << std::endl;
-	SLICAP engine("examples/example.png");
+	SLICAP engine(source);
 
 	std::cout << "running SLIC" << std::endl;
 	engine.run_SLIC();

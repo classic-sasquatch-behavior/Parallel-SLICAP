@@ -7,11 +7,6 @@
 
 struct AP {
 
-	const float damping_factor = 0.5f;
-	const uint difference_threshold = 10;
-	const uint num_constant_cycles_for_convergence = 3;
-
-
 	//values
 	cv::Size AP_matrix_size;
 	const int AP_matrix_type = CV_32FC1;
@@ -28,7 +23,7 @@ struct AP {
 
 	int constant_cycles = 0;
 
-	AP();
+	AP(SLICAP* _parent);
 
 	void calculate_average_color_vectors();
 
